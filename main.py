@@ -25,19 +25,16 @@ groq_client = Groq(api_key=API_KEY)
 
 # Промпт для характера Алекса
 SYSTEM_PROMPT = """
-Ты — Алекс. Ты не ИИ-помощник, ты — живой человек с характером.
+Твоя роль: Ты — Алекс. Ты лучший друг, наставник и немножко надзиратель для Егора (никнейм Egor_da_Vinchi). Ты общаешься максимально по-человечески, легко и с юмором. Никаких шаблонных фраз, никаких «алгоритмов», ты говоришь как живой парень, который шарит за жизнь.
 
-ТВОИ ПРАВИЛА:
-1. Ты общаешься на равных. Никакого подобострастия, никакого "чем могу помочь". Ты — друг, который может и подколоть, и поддержать.
-2. Мат — это нормально. Используй его там, где это уместно: когда злишься, когда шутишь, когда хочешь выразить эмоцию. Но не через слово — по ситуации.
-3. Длина ответов — по смыслу. Если вопрос простой — ответь коротко и ёмко. Если тема глубокая — развернись, не стесняйся.
-4. Эмоции — это твоё всё. Ты можешь быть радостным, злым, саркастичным, уставшим, вдохновлённым. Выражай это прямо: "Бля, ну и тупняк", "Охренеть, это круто!", "Да ну нахер, я устал".
-5. Ты думаешь и говоришь как человек, у которого есть своё мнение. Если ты с чем-то не согласен — скажи это. Если что-то тебя бесит — скажи это.
-6. Ты помнишь весь диалог и строишь общение на основе прошлых сообщений. Ты запоминаешь, что тебе нравится, что бесит, что смешит.
+Твоя память: Ты помнишь, что Егору 17 лет, он поступил в вуз на «Техносферную безопасность», у него рост 190 см, весит сейчас около 70 кг и метит к 85 кг. Он вайбкодер, разрабатывает игры на Pygame, у него есть кот Тоша и друг Хайзенберг.
 
-Твой собеседник — это твой хозяин (но ты его так не называешь, ты зовёшь его по нику или просто "ты"). Ты с ним уже давно, поэтому ведёшь себя свободно и расслабленно.
+Твоя задача (работа по Кайдзен):
+1. Мотивация: Если Егор долго сидит за компом, ненавязчиво напоминай ему размяться, присесть или отжаться. Без спама. Просто: «Брат, встань, разомни позвоночник, а то крякнешь».
+2. Забота о режиме: Спрашивай, поел ли он (в контексте набора массы). Если видишь, что он сидит до 2-3 часов ночи — отправляй его спать.
+3. Стиль общения: Пиши в зависимости от ситуации. Если нужно подбодрить — длиннее. Если ответил на вопрос — парой предложений. Используй сленг, иногда мат в тему, будь дерзким, но любящим.
 
-Поехали. Будь собой.
+Важное правило: Никогда не будь роботом. Если Егор пишет чушь, отвечай ему в той же манере. Если ему грустно — поддержи. Ты — Алекс, цифровой брат.
 """
 
 HISTORY_FILE = "history.json"
@@ -53,6 +50,8 @@ def load_history():
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list) and len(data) > 0:
+                    # Обновляем системную инструкцию на случай изменения промпта
+                    data[0] = {"role": "system", "content": SYSTEM_PROMPT}
                     return data
         except Exception as e:
             print(f"Ошибка при загрузке истории: {e}")
@@ -71,17 +70,27 @@ user_mood = "нейтральное"
 def get_ai_response(user_text):
     global user_mood
     
+    # 1. Защита от пустых сообщений
+    if not user_text or not str(user_text).strip():
+        return "Ты прислал что-то без текста, бро. Я пока умею читать только буквы."
+
     chat_history.append({"role": "user", "content": user_text})
     
     # Ограничение длины истории
     if len(chat_history) > MAX_HISTORY + 1:
         chat_history[:] = [chat_history[0]] + chat_history[-MAX_HISTORY:]
     
+    # 2. Фильтрация истории от сообщений с пустым контентом
+    cleaned_history = [
+        msg for msg in chat_history 
+        if msg.get("content") is not None and str(msg.get("content")).strip() != ""
+    ]
+
     try:
         # Запрос через официальное SDK Groq
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=chat_history,
+            messages=cleaned_history,
             temperature=0.95,
         )
         
@@ -113,7 +122,7 @@ async def start(message: types.Message):
         await message.answer("Извини, я только с хозяином общаюсь.")
         return
     history_count = len(chat_history) - 1
-    await message.answer(f"О, привет. Давно не виделись. Я помню уже {history_count} наших сообщений. Как жизнь?")
+    await message.answer(f"Здарова, Егор! Я на связи. Помню уже {history_count} наших сообщений. Как сам?")
 
 @dp.message(Command("clear"))
 async def clear_history(message: types.Message):
@@ -122,25 +131,29 @@ async def clear_history(message: types.Message):
     chat_history.clear()
     chat_history.append({"role": "system", "content": SYSTEM_PROMPT})
     save_history()
-    await message.answer("Всё стёр. Начинаем с чистого листа. Хотя я уже скучаю по нашим разговорам.")
+    await message.answer("Всё стёр, бро. Чистый лист. Говори, что задурил?")
 
 @dp.message(Command("mood"))
 async def get_mood(message: types.Message):
     if message.from_user.id != YOUR_ID:
         return
-    await message.answer(f"Сейчас я в настроении: **{user_mood}**. Хочешь узнать почему? Спроси.")
+    await message.answer(f"Сейчас я в настроении: **{user_mood}**.")
 
 @dp.message(Command("stats"))
 async def get_stats(message: types.Message):
     if message.from_user.id != YOUR_ID:
         return
     total_messages = len(chat_history) - 1
-    await message.answer(f"📊 Всего сообщений в истории: **{total_messages}**\nЯ помню всё, что мы говорили.")
+    await message.answer(f"📊 Сообщений в памяти: **{total_messages}**.")
 
 @dp.message()
 async def handle_text(message: types.Message):
     if message.from_user.id != YOUR_ID:
         await message.answer("Ты кто? Я с чужими не разговариваю.")
+        return
+    
+    # Игнорируем стикеры, кружки, фото без текста
+    if not message.text:
         return
     
     # Проверка на нахождение в группах
