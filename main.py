@@ -1,19 +1,21 @@
 import asyncio
 import os
-import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
+from groq import Groq
 
 # Загружаем переменные из .env
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
-API_URL = os.getenv("API_URL")
 YOUR_ID = int(os.getenv("YOUR_ID"))
 
-# Промпт для характера
+# Инициализируем клиент Groq
+client = Groq(api_key=API_KEY)
+
+# Промпт для характера Алекса
 SYSTEM_PROMPT = """
 Ты — Алекс. Ты не ИИ-помощник, ты — живой человек с характером.
 
@@ -33,42 +35,40 @@ SYSTEM_PROMPT = """
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# История диалога
+# История диалога (хранится в памяти)
 chat_history = [{"role": "system", "content": SYSTEM_PROMPT}]
 user_mood = "нейтральное"
 
 def get_ai_response(user_text):
+    """Отправляет запрос к Groq с полной историей"""
     global user_mood
     
+    # Добавляем сообщение пользователя в историю
     chat_history.append({"role": "user", "content": user_text})
     
-    # Ограничиваем историю (последние 50 сообщений)
+    # Ограничиваем историю (последние 50 сообщений, чтобы не переполнять контекст)
     if len(chat_history) > 50:
         chat_history[:] = [chat_history[0]] + chat_history[-49:]
     
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "model": "mixtral-8x7b-32768",
-        "messages": chat_history,
-        "temperature": 0.95,
-        "top_p": 0.9,
-        "max_tokens": 500,
-        "presence_penalty": 0.6,
-        "frequency_penalty": 0.3,
-    }
-    
     try:
-        response = requests.post(API_URL, headers=headers, json=data, timeout=45)
-        response.raise_for_status()
-        reply = response.json()["choices"][0]["message"]["content"]
+        # Отправляем запрос к Groq
+        response = client.chat.completions.create(
+            model="llama3-70b-8192",  # Стабильная модель Groq
+            messages=chat_history,
+            temperature=0.95,         # Креативность и эмоциональность
+            top_p=0.9,
+            max_tokens=500,           # Максимальная длина ответа
+            presence_penalty=0.6,     # Поощряет новые темы
+            frequency_penalty=0.3,    # Не даёт повторяться
+        )
         
+        # Получаем ответ
+        reply = response.choices[0].message.content
+        
+        # Сохраняем ответ в историю
         chat_history.append({"role": "assistant", "content": reply})
         
-        # Анализ эмоций
+        # Анализируем эмоциональный тон (простая эвристика)
         if "бля" in reply.lower() or "нахер" in reply.lower() or "ёба" in reply.lower():
             user_mood = "раздражённый"
         elif "смешно" in reply.lower() or "хаха" in reply.lower():
@@ -79,6 +79,7 @@ def get_ai_response(user_text):
             user_mood = "нейтральное"
             
         return reply
+    
     except Exception as e:
         return f"Ошибка связи, бля. {str(e)}. Давай попробуем ещё раз."
 
@@ -105,10 +106,12 @@ async def get_mood(message: types.Message):
 
 @dp.message()
 async def handle_text(message: types.Message):
+    # 1. Только хозяин
     if message.from_user.id != YOUR_ID:
         await message.answer("Ты кто? Я с чужими не разговариваю.")
         return
     
+    # 2. Если группа — проверяем, есть ли хозяин
     if message.chat.type in ["group", "supergroup"]:
         try:
             member = await bot.get_chat_member(message.chat.id, YOUR_ID)
@@ -117,9 +120,13 @@ async def handle_text(message: types.Message):
         except:
             return
     
+    # 3. Показываем, что бот печатает
     await bot.send_chat_action(message.chat.id, "typing")
+    
+    # 4. Получаем ответ от ИИ
     reply = get_ai_response(message.text)
     
+    # 5. Если ответ слишком длинный — разбиваем на части
     if len(reply) > 4000:
         parts = [reply[i:i+4000] for i in range(0, len(reply), 4000)]
         for part in parts:
@@ -128,7 +135,7 @@ async def handle_text(message: types.Message):
         await message.answer(reply)
 
 async def main():
-    print("Алекс онлайн. Без цензуры, с душой.")
+    print("🤖 Алекс онлайн. Без цензуры, с душой.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
