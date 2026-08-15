@@ -13,6 +13,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
 YOUR_ID = int(os.getenv("YOUR_ID"))
 
+# Проверка, что ключи подгрузились
+if not BOT_TOKEN or not API_KEY or not YOUR_ID:
+    print("Ошибка: Проверь, что в .env файле есть BOT_TOKEN, API_KEY и YOUR_ID!")
+    exit(1)
+
 # Промпт для характера Алекса
 SYSTEM_PROMPT = """
 Ты — Алекс. Ты не ИИ-помощник, ты — живой человек с характером.
@@ -71,7 +76,6 @@ def get_ai_response(user_text):
         "Content-Type": "application/json"
     }
     
-    # Модель llama-3.3-70b-versatile актуальна и поддерживается Groq
     data = {
         "model": "llama-3.3-70b-versatile",
         "messages": chat_history,
@@ -85,11 +89,6 @@ def get_ai_response(user_text):
             json=data,
             timeout=45
         )
-        
-        # Если статус не 200, выведет подробности ошибки от сервера Groq
-        if response.status_code != 200:
-            print(f"Groq API Error Response: {response.text}")
-            
         response.raise_for_status()
         reply = response.json()["choices"][0]["message"]["content"]
         
@@ -149,6 +148,7 @@ async def handle_text(message: types.Message):
         await message.answer("Ты кто? Я с чужими не разговариваю.")
         return
     
+    # Проверка, что бот в чате, где есть хозяин (если это группа)
     if message.chat.type in ["group", "supergroup"]:
         try:
             member = await bot.get_chat_member(message.chat.id, YOUR_ID)
