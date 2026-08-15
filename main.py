@@ -1,10 +1,10 @@
 import asyncio
 import os
 import json
+import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
-from groq import Groq
 
 # Загружаем переменные из .env
 load_dotenv()
@@ -12,9 +12,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
 YOUR_ID = int(os.getenv("YOUR_ID"))
-
-# Инициализируем клиент Groq
-client = Groq(api_key=API_KEY)
 
 # Промпт для характера Алекса
 SYSTEM_PROMPT = """
@@ -34,7 +31,7 @@ SYSTEM_PROMPT = """
 """
 
 HISTORY_FILE = "history.json"
-MAX_HISTORY = 100  # Максимальное количество сообщений в истории (чтобы не переполнять контекст)
+MAX_HISTORY = 100  # Максимальное количество сообщений в истории
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -46,13 +43,10 @@ def load_history():
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Проверяем, что это список и он не пустой
                 if isinstance(data, list) and len(data) > 0:
                     return data
         except:
             pass
-    
-    # Если файла нет или он повреждён — создаём новую историю
     return [{"role": "system", "content": SYSTEM_PROMPT}]
 
 def save_history():
@@ -68,31 +62,41 @@ chat_history = load_history()
 user_mood = "нейтральное"
 
 def get_ai_response(user_text):
-    """Отправляет запрос к Groq с полной историей"""
+    """Отправляет запрос к Groq через requests"""
     global user_mood
     
     # Добавляем сообщение пользователя в историю
     chat_history.append({"role": "user", "content": user_text})
     
-    # Ограничиваем историю (чтобы не переполнять контекст)
-    if len(chat_history) > MAX_HISTORY + 1:  # +1 для system
-        # Оставляем system + последние MAX_HISTORY сообщений
+    # Ограничиваем историю
+    if len(chat_history) > MAX_HISTORY + 1:
         chat_history[:] = [chat_history[0]] + chat_history[-MAX_HISTORY:]
     
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "model": "llama3-70b-8192",
+        "messages": chat_history,
+        "temperature": 0.95,
+        "top_p": 0.9,
+        "max_tokens": 500,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.3,
+    }
+    
     try:
-        # Отправляем запрос к Groq
-        response = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=chat_history,
-            temperature=0.95,
-            top_p=0.9,
-            max_tokens=500,
-            presence_penalty=0.6,
-            frequency_penalty=0.3,
+        # Отправляем POST-запрос напрямую
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=45
         )
-        
-        # Получаем ответ
-        reply = response.choices[0].message.content
+        response.raise_for_status()
+        reply = response.json()["choices"][0]["message"]["content"]
         
         # Сохраняем ответ в историю
         chat_history.append({"role": "assistant", "content": reply})
@@ -112,24 +116,23 @@ def get_ai_response(user_text):
             
         return reply
     
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         return f"Ошибка связи, бля. {str(e)}. Давай попробуем ещё раз."
+    except Exception as e:
+        return f"Что-то пошло не так: {str(e)}. Попробуй ещё раз."
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     if message.from_user.id != YOUR_ID:
         await message.answer("Извини, я только с хозяином общаюсь.")
         return
-    # Показываем, сколько сообщений в истории
-    history_count = len(chat_history) - 1  # минус system
+    history_count = len(chat_history) - 1
     await message.answer(f"О, привет. Давно не виделись. Я помню уже {history_count} наших сообщений. Как жизнь?")
 
 @dp.message(Command("clear"))
 async def clear_history(message: types.Message):
     if message.from_user.id != YOUR_ID:
         return
-    
-    # Очищаем историю и сохраняем
     chat_history.clear()
     chat_history.append({"role": "system", "content": SYSTEM_PROMPT})
     save_history()
@@ -145,17 +148,15 @@ async def get_mood(message: types.Message):
 async def get_stats(message: types.Message):
     if message.from_user.id != YOUR_ID:
         return
-    total_messages = len(chat_history) - 1  # минус system
+    total_messages = len(chat_history) - 1
     await message.answer(f"📊 Всего сообщений в истории: **{total_messages}**\nЯ помню всё, что мы говорили.")
 
 @dp.message()
 async def handle_text(message: types.Message):
-    # 1. Только хозяин
     if message.from_user.id != YOUR_ID:
         await message.answer("Ты кто? Я с чужими не разговариваю.")
         return
     
-    # 2. Если группа — проверяем, есть ли хозяин
     if message.chat.type in ["group", "supergroup"]:
         try:
             member = await bot.get_chat_member(message.chat.id, YOUR_ID)
@@ -164,13 +165,9 @@ async def handle_text(message: types.Message):
         except:
             return
     
-    # 3. Показываем, что бот печатает
     await bot.send_chat_action(message.chat.id, "typing")
-    
-    # 4. Получаем ответ от ИИ
     reply = get_ai_response(message.text)
     
-    # 5. Если ответ слишком длинный — разбиваем на части
     if len(reply) > 4000:
         parts = [reply[i:i+4000] for i in range(0, len(reply), 4000)]
         for part in parts:
@@ -179,7 +176,6 @@ async def handle_text(message: types.Message):
         await message.answer(reply)
 
 async def main():
-    # Загружаем историю при старте
     global chat_history
     chat_history = load_history()
     print(f"🤖 Алекс онлайн. Загружено {len(chat_history) - 1} сообщений истории.")
