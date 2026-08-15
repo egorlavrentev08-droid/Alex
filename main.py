@@ -1,18 +1,19 @@
 import asyncio
+import os
 import requests
-import json
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from datetime import datetime
+from dotenv import load_dotenv
 
-# --- НАСТРОЙКИ ---
-BOT_TOKEN = "8885099048:AAGryyJjIED0x3LH-SXW0ncTCHdRJUwVx04"
-API_KEY = "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"
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
+# Загружаем переменные из .env
+load_dotenv()
 
-YOUR_ID = 6595788533
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_KEY = os.getenv("API_KEY")
+API_URL = os.getenv("API_URL")
+YOUR_ID = int(os.getenv("YOUR_ID"))
 
-# МОЩНЫЙ ПРОМПТ ДЛЯ ХАРАКТЕРА
+# Промпт для характера
 SYSTEM_PROMPT = """
 Ты — Алекс. Ты не ИИ-помощник, ты — живой человек с характером.
 
@@ -32,24 +33,17 @@ SYSTEM_PROMPT = """
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# История с метаданными (эмоции, время)
-chat_history = [
-    {"role": "system", "content": SYSTEM_PROMPT}
-]
-
-# Храним последнее эмоциональное состояние (для контекста)
+# История диалога
+chat_history = [{"role": "system", "content": SYSTEM_PROMPT}]
 user_mood = "нейтральное"
 
 def get_ai_response(user_text):
-    """Отправляет запрос с полной историей и динамической настройкой"""
     global user_mood
     
-    # Добавляем сообщение пользователя в историю
     chat_history.append({"role": "user", "content": user_text})
     
-    # Ограничиваем историю, чтобы не переполнять (последние 50 сообщений)
+    # Ограничиваем историю (последние 50 сообщений)
     if len(chat_history) > 50:
-        # Оставляем system + последние 49 сообщений
         chat_history[:] = [chat_history[0]] + chat_history[-49:]
     
     headers = {
@@ -58,13 +52,13 @@ def get_ai_response(user_text):
     }
     
     data = {
-        "model": "mixtral-8x7b-32768",  # Можно поменять на llama3-70b-8192
+        "model": "mixtral-8x7b-32768",
         "messages": chat_history,
-        "temperature": 0.95,  # Высокая температура = больше креатива и эмоций
+        "temperature": 0.95,
         "top_p": 0.9,
-        "max_tokens": 500,  # Максимальная длина ответа
-        "presence_penalty": 0.6,  # Поощряет новые темы
-        "frequency_penalty": 0.3,  # Не даёт повторяться
+        "max_tokens": 500,
+        "presence_penalty": 0.6,
+        "frequency_penalty": 0.3,
     }
     
     try:
@@ -72,10 +66,9 @@ def get_ai_response(user_text):
         response.raise_for_status()
         reply = response.json()["choices"][0]["message"]["content"]
         
-        # Сохраняем ответ в историю
         chat_history.append({"role": "assistant", "content": reply})
         
-        # Анализируем эмоциональный тон (простая эвристика)
+        # Анализ эмоций
         if "бля" in reply.lower() or "нахер" in reply.lower() or "ёба" in reply.lower():
             user_mood = "раздражённый"
         elif "смешно" in reply.lower() or "хаха" in reply.lower():
@@ -112,12 +105,10 @@ async def get_mood(message: types.Message):
 
 @dp.message()
 async def handle_text(message: types.Message):
-    # 1. Только хозяин
     if message.from_user.id != YOUR_ID:
         await message.answer("Ты кто? Я с чужими не разговариваю.")
         return
     
-    # 2. Если группа — проверяем, есть ли хозяин
     if message.chat.type in ["group", "supergroup"]:
         try:
             member = await bot.get_chat_member(message.chat.id, YOUR_ID)
@@ -126,11 +117,9 @@ async def handle_text(message: types.Message):
         except:
             return
     
-    # 3. Отвечаем
     await bot.send_chat_action(message.chat.id, "typing")
     reply = get_ai_response(message.text)
     
-    # Разбиваем длинные сообщения (если ответ > 4096 символов)
     if len(reply) > 4000:
         parts = [reply[i:i+4000] for i in range(0, len(reply), 4000)]
         for part in parts:
