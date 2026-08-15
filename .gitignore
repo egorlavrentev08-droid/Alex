@@ -1,21 +1,10 @@
-# Файлы с секретами (если создашь)
 .env
-config.json
-
-# Системные файлы Python
+history.json
 __pycache__/
 *.pyc
 *.pyo
-
-# Виртуальное окружение
 venv/
 env/
 .venv/
-
-# Файлы истории (если будешь сохранять в файл)
-history.json
-history.db
-
-# IDE
 .vscode/
 .idea/
