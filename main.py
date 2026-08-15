@@ -31,14 +31,13 @@ SYSTEM_PROMPT = """
 """
 
 HISTORY_FILE = "history.json"
-MAX_HISTORY = 100  # Максимальное количество сообщений в истории
+MAX_HISTORY = 100
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Загружаем историю из файла
 def load_history():
-    """Загружает историю из history.json"""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
@@ -50,25 +49,20 @@ def load_history():
     return [{"role": "system", "content": SYSTEM_PROMPT}]
 
 def save_history():
-    """Сохраняет историю в history.json"""
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(chat_history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Ошибка сохранения истории: {e}")
 
-# Загружаем историю при старте
 chat_history = load_history()
 user_mood = "нейтральное"
 
 def get_ai_response(user_text):
-    """Отправляет запрос к Groq через requests"""
     global user_mood
     
-    # Добавляем сообщение пользователя в историю
     chat_history.append({"role": "user", "content": user_text})
     
-    # Ограничиваем историю
     if len(chat_history) > MAX_HISTORY + 1:
         chat_history[:] = [chat_history[0]] + chat_history[-MAX_HISTORY:]
     
@@ -88,7 +82,6 @@ def get_ai_response(user_text):
     }
     
     try:
-        # Отправляем POST-запрос напрямую
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
@@ -98,13 +91,9 @@ def get_ai_response(user_text):
         response.raise_for_status()
         reply = response.json()["choices"][0]["message"]["content"]
         
-        # Сохраняем ответ в историю
         chat_history.append({"role": "assistant", "content": reply})
-        
-        # Сохраняем историю в файл
         save_history()
         
-        # Анализируем эмоциональный тон
         if "бля" in reply.lower() or "нахер" in reply.lower() or "ёба" in reply.lower():
             user_mood = "раздражённый"
         elif "смешно" in reply.lower() or "хаха" in reply.lower():
