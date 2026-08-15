@@ -1,22 +1,27 @@
 import asyncio
 import os
 import json
-import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
+from groq import Groq
 
 # Загружаем переменные из .env
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
-YOUR_ID = int(os.getenv("YOUR_ID"))
+YOUR_ID_RAW = os.getenv("YOUR_ID")
 
-# Проверка, что ключи подгрузились
-if not BOT_TOKEN or not API_KEY or not YOUR_ID:
-    print("Ошибка: Проверь, что в .env файле есть BOT_TOKEN, API_KEY и YOUR_ID!")
+# Проверка загрузки данных из .env
+if not BOT_TOKEN or not API_KEY or not YOUR_ID_RAW:
+    print("❌ Ошибка: Проверь .env файл! Не найден BOT_TOKEN, API_KEY или YOUR_ID.")
     exit(1)
+
+YOUR_ID = int(YOUR_ID_RAW)
+
+# Инициализируем клиент Groq
+groq_client = Groq(api_key=API_KEY)
 
 # Промпт для характера Алекса
 SYSTEM_PROMPT = """
@@ -49,8 +54,8 @@ def load_history():
                 data = json.load(f)
                 if isinstance(data, list) and len(data) > 0:
                     return data
-        except:
-            pass
+        except Exception as e:
+            print(f"Ошибка при загрузке истории: {e}")
     return [{"role": "system", "content": SYSTEM_PROMPT}]
 
 def save_history():
@@ -68,49 +73,39 @@ def get_ai_response(user_text):
     
     chat_history.append({"role": "user", "content": user_text})
     
+    # Ограничение длины истории
     if len(chat_history) > MAX_HISTORY + 1:
         chat_history[:] = [chat_history[0]] + chat_history[-MAX_HISTORY:]
     
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": chat_history,
-        "temperature": 0.95,
-    }
-    
     try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=45
+        # Запрос через официальное SDK Groq
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=chat_history,
+            temperature=0.95,
         )
-        response.raise_for_status()
-        reply = response.json()["choices"][0]["message"]["content"]
+        
+        reply = response.choices[0].message.content
         
         chat_history.append({"role": "assistant", "content": reply})
         save_history()
         
-        # Анализ эмоций
-        if any(w in reply.lower() for w in ["бля", "нахер", "ёба"]):
+        # Анализ настроения
+        reply_lower = reply.lower()
+        if any(w in reply_lower for w in ["бля", "нахер", "ёба"]):
             user_mood = "раздражённый"
-        elif any(w in reply.lower() for w in ["смешно", "хаха"]):
+        elif any(w in reply_lower for w in ["смешно", "хаха"]):
             user_mood = "весёлый"
-        elif any(w in reply.lower() for w in ["устал", "надоело"]):
+        elif any(w in reply_lower for w in ["устал", "надоело"]):
             user_mood = "уставший"
         else:
             user_mood = "нейтральное"
             
         return reply
     
-    except requests.exceptions.RequestException as e:
-        return f"Ошибка связи, бля. {str(e)}. Давай попробуем ещё раз."
     except Exception as e:
-        return f"Что-то пошло не так: {str(e)}. Попробуй ещё раз."
+        print(f"Ошибка Groq API: {e}")
+        return f"Ошибка связи, бля. {str(e)}. Попробуй еще раз."
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -148,7 +143,7 @@ async def handle_text(message: types.Message):
         await message.answer("Ты кто? Я с чужими не разговариваю.")
         return
     
-    # Проверка, что бот в чате, где есть хозяин (если это группа)
+    # Проверка на нахождение в группах
     if message.chat.type in ["group", "supergroup"]:
         try:
             member = await bot.get_chat_member(message.chat.id, YOUR_ID)
@@ -160,6 +155,7 @@ async def handle_text(message: types.Message):
     await bot.send_chat_action(message.chat.id, "typing")
     reply = get_ai_response(message.text)
     
+    # Длительные ответы разбиваем на части
     if len(reply) > 4000:
         parts = [reply[i:i+4000] for i in range(0, len(reply), 4000)]
         for part in parts:
