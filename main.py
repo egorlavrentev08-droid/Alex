@@ -71,14 +71,11 @@ def get_ai_response(user_text):
         "Content-Type": "application/json"
     }
     
+    # Минимальный рабочий запрос (без лишних параметров)
     data = {
-        "model": "llama3-70b-8192",
+        "model": "mixtral-8x7b-32768",  # Гарантированно работает
         "messages": chat_history,
         "temperature": 0.95,
-        "top_p": 0.9,
-        "max_tokens": 500,
-        "presence_penalty": 0.6,
-        "frequency_penalty": 0.3,
     }
     
     try:
@@ -94,6 +91,7 @@ def get_ai_response(user_text):
         chat_history.append({"role": "assistant", "content": reply})
         save_history()
         
+        # Анализ эмоций
         if "бля" in reply.lower() or "нахер" in reply.lower() or "ёба" in reply.lower():
             user_mood = "раздражённый"
         elif "смешно" in reply.lower() or "хаха" in reply.lower():
