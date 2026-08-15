@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+from datetime import datetime, timezone, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
@@ -23,8 +24,11 @@ YOUR_ID = int(YOUR_ID_RAW)
 # Инициализируем клиент Groq
 groq_client = Groq(api_key=API_KEY)
 
-# Промпт для характера Алекса
-SYSTEM_PROMPT = """
+# Часовой пояс Москвы (UTC+3)
+MSK_TZ = timezone(timedelta(hours=3))
+
+# Базовый промпт для характера Алекса
+SYSTEM_PROMPT_BASE = """
 Твоя роль: Ты — Алекс. Ты лучший друг, наставник и немножко надзиратель для Егора (никнейм Egor_da_Vinchi). Ты общаешься максимально по-человечески, легко и с юмором. Никаких шаблонных фраз, никаких «алгоритмов», ты говоришь как живой парень, который шарит за жизнь.
 
 Твоя память: Ты помнишь, что Егору 17 лет, он поступил в вуз на «Техносферную безопасность», у него рост 190 см, весит сейчас около 70 кг и метит к 85 кг. Он вайбкодер, разрабатывает игры на Pygame, у него есть кот Тоша и друг Хайзенберг.
@@ -43,6 +47,11 @@ MAX_HISTORY = 100
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Функция получения актуальной системной инструкции с текущим временем МСК
+def get_system_prompt():
+    now_msk = datetime.now(MSK_TZ).strftime("%d.%m.%Y %H:%M")
+    return f"{SYSTEM_PROMPT_BASE}\n\nТекущие дата и время пользователя (МСК, UTC+3): {now_msk}."
+
 # Загружаем историю из файла
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -50,12 +59,11 @@ def load_history():
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list) and len(data) > 0:
-                    # Обновляем системную инструкцию на случай изменения промпта
-                    data[0] = {"role": "system", "content": SYSTEM_PROMPT}
+                    data[0] = {"role": "system", "content": get_system_prompt()}
                     return data
         except Exception as e:
             print(f"Ошибка при загрузке истории: {e}")
-    return [{"role": "system", "content": SYSTEM_PROMPT}]
+    return [{"role": "system", "content": get_system_prompt()}]
 
 def save_history():
     try:
@@ -73,6 +81,9 @@ def get_ai_response(user_text):
     # 1. Защита от пустых сообщений
     if not user_text or not str(user_text).strip():
         return "Ты прислал что-то без текста, бро. Я пока умею читать только буквы."
+
+    # Обновляем точное время МСК перед отправкой
+    chat_history[0] = {"role": "system", "content": get_system_prompt()}
 
     chat_history.append({"role": "user", "content": user_text})
     
@@ -129,7 +140,7 @@ async def clear_history(message: types.Message):
     if message.from_user.id != YOUR_ID:
         return
     chat_history.clear()
-    chat_history.append({"role": "system", "content": SYSTEM_PROMPT})
+    chat_history.append({"role": "system", "content": get_system_prompt()})
     save_history()
     await message.answer("Всё стёр, бро. Чистый лист. Говори, что задурил?")
 
