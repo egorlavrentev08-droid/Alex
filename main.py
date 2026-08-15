@@ -71,9 +71,9 @@ def get_ai_response(user_text):
         "Content-Type": "application/json"
     }
     
-    # Минимальный рабочий запрос (без лишних параметров)
+    # Модель llama-3.3-70b-versatile актуальна и поддерживается Groq
     data = {
-        "model": "mixtral-8x7b-32768",  # Гарантированно работает
+        "model": "llama-3.3-70b-versatile",
         "messages": chat_history,
         "temperature": 0.95,
     }
@@ -85,6 +85,11 @@ def get_ai_response(user_text):
             json=data,
             timeout=45
         )
+        
+        # Если статус не 200, выведет подробности ошибки от сервера Groq
+        if response.status_code != 200:
+            print(f"Groq API Error Response: {response.text}")
+            
         response.raise_for_status()
         reply = response.json()["choices"][0]["message"]["content"]
         
@@ -92,11 +97,11 @@ def get_ai_response(user_text):
         save_history()
         
         # Анализ эмоций
-        if "бля" in reply.lower() or "нахер" in reply.lower() or "ёба" in reply.lower():
+        if any(w in reply.lower() for w in ["бля", "нахер", "ёба"]):
             user_mood = "раздражённый"
-        elif "смешно" in reply.lower() or "хаха" in reply.lower():
+        elif any(w in reply.lower() for w in ["смешно", "хаха"]):
             user_mood = "весёлый"
-        elif "устал" in reply.lower() or "надоело" in reply.lower():
+        elif any(w in reply.lower() for w in ["устал", "надоело"]):
             user_mood = "уставший"
         else:
             user_mood = "нейтральное"
